@@ -1,9 +1,11 @@
 import streamlit as st
 import requests
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 from datetime import datetime
 
-# 页面配置（简洁风格）
+# 页面配置（简洁风格，保留地图功能）
 st.set_page_config(
     page_title="Open-Meteo Weather Dashboard",
     page_icon="🌤️",
@@ -112,6 +114,7 @@ def main():
         - Real-time weather metrics
         - 7-day detailed forecast
         - Hourly temperature/precipitation
+        - Interactive location map
         """)
 
     # 获取天气数据
@@ -122,37 +125,59 @@ def main():
     if not weather_data:
         st.stop()
 
-    # 解析数据
-    current = weather_data["current"]
-    daily = weather_data["daily"]
-    hourly = weather_data["hourly"]
-    timezone = weather_data["timezone"]
+    # 解析数据（增加空值判断，避免键不存在报错）
+    current = weather_data.get("current", {})
+    daily = weather_data.get("daily", {})
+    hourly = weather_data.get("hourly", {})
+    timezone = weather_data.get("timezone", "UTC")
 
-    # 实时天气展示（关键修改：移除所有 icon 参数）
+    # 实时天气展示
     st.header(f"Current Weather - {selected_city.split(' ')[0]}")
-    current_time = datetime.fromisoformat(current["time"]).strftime("%Y-%m-%d %H:%M")
-    weather_icon, weather_desc = weather_code_to_info(current["weather_code"])
-    day_night = "🌞 Day" if current["is_day"] == 1 else "🌙 Night"
+    current_time = datetime.fromisoformat(current.get("time", "2024-01-01T00:00")).strftime("%Y-%m-%d %H:%M")
+    weather_icon, weather_desc = weather_code_to_info(current.get("weather_code"))
+    day_night = "🌞 Day" if current.get("is_day") == 1 else "🌙 Night"
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        # 移除 icon=weather_icon
-        st.metric("Temperature", f"{current['temperature_2m']:.1f} °C")
-        st.caption(f"{weather_icon} Weather: {weather_desc}")  # 图标移到 caption 中
+        st.metric("Temperature", f"{current.get('temperature_2m', 0):.1f} °C")
+        st.caption(f"{weather_icon} Weather: {weather_desc}")
     with col2:
-        # 移除 icon="💧"
-        st.metric("Humidity", f"{current['relative_humidity_2m']} %")
+        st.metric("Humidity", f"{current.get('relative_humidity_2m', 0)} %")
         st.caption(f"Timezone: {timezone}")
     with col3:
-        # 移除 icon="💨"
-        st.metric("Wind Speed", f"{current['wind_speed_10m']:.1f} km/h")
+        st.metric("Wind Speed", f"{current.get('wind_speed_10m', 0):.1f} km/h")
         st.caption(f"Updated: {current_time}")
     with col4:
-        # 移除 icon=day_night.split()[0]
         st.metric("Day/Night", day_night.split()[0])
-        hourly_precip = [p for p in hourly["precipitation"][:24] if p > 0.1]
+        hourly_precip = [p for p in hourly.get("precipitation", [])[:24] if p > 0.1]
         precip_prob = f"{len(hourly_precip)/24*100:.0f}%" if hourly_precip else "0%"
         st.caption(f"🌧️ Precipitation Chance: {precip_prob}")
+
+    # ------------------------------
+    # 恢复地图功能（兼容所有版本）
+    # ------------------------------
+    st.markdown("---")
+    st.subheader("📍 Location Map")
+    try:
+        # 创建地图（使用 OpenStreetMap 瓦片，加载稳定）
+        m = folium.Map(
+            location=[lat, lon],
+            zoom_start=10,
+            tiles="OpenStreetMap",
+            width="100%",
+            height="300px"
+        )
+        # 添加城市标记
+        folium.Marker(
+            location=[lat, lon],
+            popup=f"<b>{selected_city}</b><br>Lat: {lat:.4f}<br>Lon: {lon:.4f}",
+            icon=folium.Icon(color="blue", icon="cloud", prefix="fa")
+        ).add_to(m)
+        # 在 Streamlit 中渲染地图
+        st_folium(m, width=1200, height=300, returned_objects=[])
+    except Exception as e:
+        # 地图加载失败时友好提示，不影响整体功能
+        st.warning(f"Map could not be loaded: {str(e)}")
 
     # 预报图表
     st.markdown("---")
@@ -160,64 +185,76 @@ def main():
 
     with tab1:
         st.subheader("7-Day Weather Overview")
-        dates = [datetime.fromisoformat(date).strftime("%m-%d (%a)") for date in daily["time"]]
-        daily_icons = [weather_code_to_info(code)[0] for code in daily["weather_code"]]
+        dates = daily.get("time", [])
+        dates = [datetime.fromisoformat(date).strftime("%m-%d (%a)") for date in dates] if dates else []
+        
+        daily_codes = daily.get("weather_code", [])
+        daily_icons = [weather_code_to_info(code)[0] for code in daily_codes] if daily_codes else []
 
+        # 数据类型修复：转 Series 后 round
         df_daily = pd.DataFrame({
             "Date": dates,
             "Weather": daily_icons,
-            "Max Temp (°C)": daily["temperature_2m_max"].round(1),
-            "Min Temp (°C)": daily["temperature_2m_min"].round(1),
-            "Rain (mm)": daily["rain_sum"].round(1),
-            "Snow (mm)": daily["snowfall_sum"].round(1),
-            "Sunshine (h)": daily["sunshine_duration"].round(1)
+            "Max Temp (°C)": pd.Series(daily.get("temperature_2m_max", [])).round(1),
+            "Min Temp (°C)": pd.Series(daily.get("temperature_2m_min", [])).round(1),
+            "Rain (mm)": pd.Series(daily.get("rain_sum", [])).round(1),
+            "Snow (mm)": pd.Series(daily.get("snowfall_sum", [])).round(1),
+            "Sunshine (h)": pd.Series(daily.get("sunshine_duration", [])).round(1)
         })
 
         st.dataframe(df_daily, use_container_width=True, hide_index=True)
 
-        st.subheader("Temperature Trend")
-        st.line_chart(
-            df_daily,
-            x="Date",
-            y=["Max Temp (°C)", "Min Temp (°C)"],
-            use_container_width=True,
-            color=["#ff6b6b", "#4ecdc4"]
-        )
+        if not df_daily.empty:
+            st.subheader("Temperature Trend")
+            st.line_chart(
+                df_daily,
+                x="Date",
+                y=["Max Temp (°C)", "Min Temp (°C)"],
+                use_container_width=True,
+                color=["#ff6b6b", "#4ecdc4"]
+            )
 
-        st.subheader("Rain & Snow Forecast")
-        st.bar_chart(
-            df_daily,
-            x="Date",
-            y=["Rain (mm)", "Snow (mm)"],
-            use_container_width=True,
-            color=["#4a90e2", "#f5f5f5"]
-        )
+            st.subheader("Rain & Snow Forecast")
+            st.bar_chart(
+                df_daily,
+                x="Date",
+                y=["Rain (mm)", "Snow (mm)"],
+                use_container_width=True,
+                color=["#4a90e2", "#f5f5f5"]
+            )
+        else:
+            st.info("No 7-day forecast data available.")
 
     with tab2:
         st.subheader("Next 24-Hour Temperature")
-        hours = [datetime.fromisoformat(time).strftime("%H:%M") for time in hourly["time"][:24]]
+        hours = hourly.get("time", [])[:24]
+        hours = [datetime.fromisoformat(time).strftime("%H:%M") for time in hours] if hours else []
+        
         df_hourly = pd.DataFrame({
             "Time": hours,
-            "Temperature (°C)": hourly["temperature_2m"][:24].round(1),
-            "Precipitation (mm)": hourly["precipitation"][:24].round(2)
+            "Temperature (°C)": pd.Series(hourly.get("temperature_2m", [])[:24]).round(1),
+            "Precipitation (mm)": pd.Series(hourly.get("precipitation", [])[:24]).round(2)
         })
 
-        st.line_chart(
-            df_hourly,
-            x="Time",
-            y="Temperature (°C)",
-            use_container_width=True,
-            color="#ff6b6b"
-        )
+        if not df_hourly.empty:
+            st.line_chart(
+                df_hourly,
+                x="Time",
+                y="Temperature (°C)",
+                use_container_width=True,
+                color="#ff6b6b"
+            )
 
-        st.subheader("Next 24-Hour Precipitation")
-        st.bar_chart(
-            df_hourly,
-            x="Time",
-            y="Precipitation (mm)",
-            use_container_width=True,
-            color="#4a90e2"
-        )
+            st.subheader("Next 24-Hour Precipitation")
+            st.bar_chart(
+                df_hourly,
+                x="Time",
+                y="Precipitation (mm)",
+                use_container_width=True,
+                color="#4a90e2"
+            )
+        else:
+            st.info("No hourly forecast data available.")
 
 if __name__ == "__main__":
     main()
