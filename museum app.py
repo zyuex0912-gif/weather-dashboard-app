@@ -41,9 +41,14 @@ def search_artworks(keyword, department_id=None, has_images=True, limit=50):
     }
     response = requests.get(url, params=params)
     if response.status_code == 200:
-        object_ids = response.json().get("objectIDs", [])
-        return object_ids[:limit]  # 限制返回数量
-    return []
+        # 关键修改：确保object_ids是列表（如果API返回None则设为空列表）
+        object_ids = response.json().get("objectIDs", [])  # 这里将默认值设为[]
+        # 只有当object_ids是列表时才切片
+        if isinstance(object_ids, list):
+            return object_ids[:limit]  # 限制返回数量
+        else:
+            return []  # 非列表类型时返回空列表
+    return []  # API请求失败时返回空列表
 
 def get_artwork_details(object_id):
     """获取单件艺术品的详细信息"""
