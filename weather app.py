@@ -114,7 +114,7 @@ def clean_coordinates(lat, lon):
 # Main application logic
 # ------------------------------
 def main():
-    st.title("🌍 Global Weather Dashboard")
+    st.title("🌍 Open-Meteo Interactive Weather Dashboard")
     st.subheader("Real-time & 7-Day Forecast (Powered by Open-Meteo API)")
 
     # Initialize session state with valid default (New York)
@@ -170,8 +170,8 @@ def main():
     # Optimized Interactive Map (fixed click issues)
     # ------------------------------
     st.markdown("---")
-    st.subheader("🌍 Interactive Map (Click anywhere on land/ocean)")
-    st.caption("Zoom in/out with mouse wheel | Drag to pan | Click to select location")
+    st.subheader(" Interactive Map")
+    st.caption("Drag to pan | Click to select location")
     try:
         # Create map with optimized settings (prevent invalid clicks)
         m = folium.Map(
