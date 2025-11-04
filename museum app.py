@@ -97,4 +97,4 @@ if st.button("Search", type="primary"):
                 st.info(f"No artworks found for '{keyword}'. Try other keywords like 'flower' or 'Chinese figure with bird'!")
 
 st.markdown("---")
-st.caption("Data source: Metropolitan Museum of Art Open API | No API key required")
+st.caption("Data source: Metropolitan Museum of Art Open API")
