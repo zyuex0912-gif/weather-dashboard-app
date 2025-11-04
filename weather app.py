@@ -25,10 +25,14 @@ header {visibility: hidden;}
 st.markdown(hide_style, unsafe_allow_html=True)
 
 # ------------------------------
-# Core function: Fetch data from Open-Meteo API
+# Core function: Fetch data from Open-Meteo API (with coordinate validation)
 # ------------------------------
 def get_weather_data(lat, lon):
-    """Retrieve weather data from Open-Meteo public API"""
+    """Retrieve weather data with strict coordinate validation"""
+    # Step 1: Validate coordinate range (fix invalid values automatically)
+    lat = max(-90.0, min(90.0, lat))  # Force latitude between -90 and 90
+    lon = max(-180.0, min(180.0, lon))  # Force longitude between -180 and 180
+
     api_url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
@@ -86,17 +90,38 @@ def weather_code_to_info(code):
         return "❓", "Unknown weather"
 
 # ------------------------------
+# Helper function: Clean and validate map click coordinates
+# ------------------------------
+def clean_coordinates(lat, lon):
+    """Clean and validate coordinates from map click"""
+    # Fix latitude (must be -90 to 90)
+    lat = float(lat)
+    if lat < -90:
+        lat = -90.0
+    elif lat > 90:
+        lat = 90.0
+
+    # Fix longitude (must be -180 to 180)
+    lon = float(lon)
+    while lon < -180:
+        lon += 360
+    while lon > 180:
+        lon -= 360
+
+    return lat, lon
+
+# ------------------------------
 # Main application logic
 # ------------------------------
 def main():
     st.title("🌍 Global Weather Dashboard")
     st.subheader("Real-time & 7-Day Forecast (Powered by Open-Meteo API)")
 
-    # Initialize session state for coordinates
+    # Initialize session state with valid default (New York)
     if 'lat' not in st.session_state:
-        st.session_state.lat = 40.7128  # Default: New York latitude
+        st.session_state.lat = 40.7128  # Valid latitude
     if 'lon' not in st.session_state:
-        st.session_state.lon = -74.0060  # Default: New York longitude
+        st.session_state.lon = -74.0060  # Valid longitude
     if 'location_name' not in st.session_state:
         st.session_state.location_name = "New York, USA"
 
@@ -108,26 +133,32 @@ def main():
 
         if selection_method == "Enter Coordinates":
             st.subheader("Manual Coordinates")
+            st.caption("Valid range: Latitude (-90 to 90), Longitude (-180 to 180)")
+            # Force valid range in input (user can't enter invalid values)
             lat_input = st.number_input("Latitude", 
-                                      min_value=-90.0, max_value=90.0, 
-                                      value=st.session_state.lat, step=0.0001)
+                                      min_value=-90.0, max_value=90.0,
+                                      value=st.session_state.lat, step=0.0001,
+                                      format="%.4f")
             lon_input = st.number_input("Longitude", 
-                                      min_value=-180.0, max_value=180.0, 
-                                      value=st.session_state.lon, step=0.0001)
+                                      min_value=-180.0, max_value=180.0,
+                                      value=st.session_state.lon, step=0.0001,
+                                      format="%.4f")
             location_name = st.text_input("Location Name (optional)", 
                                          st.session_state.location_name)
             
             if st.button("Set Location", type="primary"):
-                st.session_state.lat = lat_input
-                st.session_state.lon = lon_input
+                # Clean coordinates even if input is valid (double safety)
+                clean_lat, clean_lon = clean_coordinates(lat_input, lon_input)
+                st.session_state.lat = clean_lat
+                st.session_state.lon = clean_lon
                 st.session_state.location_name = location_name if location_name else \
-                                               f"Coordinates: {lat_input:.4f}, {lon_input:.4f}"
+                                               f"Coordinates: {clean_lat:.4f}, {clean_lon:.4f}"
                 st.success("Location updated successfully")
 
         st.markdown("---")
         st.info("""
         📡 Data Source: Open-Meteo Public API  
-        🌐 Coverage: Global (any latitude/longitude)  
+        🌐 Coverage: Global (any valid latitude/longitude)  
         ✨ Features:
         - Real-time weather metrics
         - 7-day detailed forecast
@@ -135,42 +166,66 @@ def main():
         - Interactive global map
         """)
 
-    # Interactive global map
+    # ------------------------------
+    # Optimized Interactive Map (fixed click issues)
+    # ------------------------------
     st.markdown("---")
-    st.subheader("🌍 Interactive Map (Click to select location)")
+    st.subheader("🌍 Interactive Map (Click anywhere on land/ocean)")
+    st.caption("Zoom in/out with mouse wheel | Drag to pan | Click to select location")
     try:
+        # Create map with optimized settings (prevent invalid clicks)
         m = folium.Map(
             location=[st.session_state.lat, st.session_state.lon],
-            zoom_start=3,
+            zoom_start=2,  # Start with world view (harder to get invalid coordinates)
+            min_zoom=1,    # Prevent over-zooming out (causes coordinate errors)
+            max_zoom=16,   # Prevent over-zooming in (unnecessary for weather data)
             tiles="CartoDB positron",
             width="100%",
-            height="500px"
+            height="500px",
+            # Disable extreme panning (keep map within Earth bounds)
+            max_bounds=True,
+            max_bounds_extend=False
         )
 
-        # Add click-to-select functionality
+        # Add click-to-select (only returns valid Earth coordinates)
         m.add_child(folium.LatLngPopup())
 
-        # Add marker for current location
+        # Add marker for current location (red dot, easy to see)
         folium.Marker(
             location=[st.session_state.lat, st.session_state.lon],
             popup=f"<b>{st.session_state.location_name}</b><br>Lat: {st.session_state.lat:.4f}<br>Lon: {st.session_state.lon:.4f}",
-            icon=folium.Icon(color="red", icon="map-marker", prefix="fa")
+            icon=folium.Icon(color="red", icon="map-marker", prefix="fa", size=(10, 10))
+        ).add_to(m)
+
+        # Add world boundaries (optional: help user see valid areas)
+        folium.GeoJson(
+            data="https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json",
+            style_function=lambda x: {"fillColor": "#f0f0f0", "color": "#cccccc", "weight": 1}
         ).add_to(m)
 
         # Display map and capture interactions
         map_response = st_folium(m, width=1200, height=500, returned_objects=["last_clicked"])
 
-        # Update location if user clicks on map
+        # Update location only if click is valid (not None)
         if map_response.get("last_clicked"):
-            st.session_state.lat = map_response["last_clicked"]["lat"]
-            st.session_state.lon = map_response["last_clicked"]["lng"]
-            st.session_state.location_name = "Selected Location"
-            st.experimental_rerun()
+            # Clean and validate click coordinates (fixes invalid values)
+            clicked_lat = map_response["last_clicked"]["lat"]
+            clicked_lon = map_response["last_clicked"]["lng"]
+            clean_lat, clean_lon = clean_coordinates(clicked_lat, clicked_lon)
+            
+            # Update session state with valid coordinates
+            st.session_state.lat = clean_lat
+            st.session_state.lon = clean_lon
+            st.session_state.location_name = f"Selected Location ({clean_lat:.4f}, {clean_lon:.4f})"
+            
+            # Refresh page to show new location data
+            st.rerun()
 
     except Exception as e:
         st.warning(f"Map could not be loaded: {str(e)}")
+        st.info("Try refreshing the page or selecting location via coordinates.")
 
-    # Fetch weather data for selected location
+    # Fetch weather data for valid coordinates
     st.markdown("---")
     with st.spinner(f"Fetching weather data for {st.session_state.location_name}..."):
         weather_data = get_weather_data(st.session_state.lat, st.session_state.lon)
