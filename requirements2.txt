@@ -1,0 +1,5 @@
+streamlit>=1.20.0
+requests
+pandas
+folium  # 新增：地图库
+streamlit-folium  # 新增：Streamlit 集成地图的库
